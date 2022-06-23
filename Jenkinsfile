@@ -10,36 +10,47 @@ pipeline {
       }
     }
 
-    stage('Unit Tests - JUnit and JaCoCo') {
+    stage('Unit Tests - JUnit and Jacoco') {
       steps {
         sh "mvn test"
       }
+      post {
+        always {
+          junit 'target/surefire-reports/*.xml'
+          jacoco execPattern: 'target/jacoco.exec'
+        }
+      }
     }
-
     stage('Mutation Tests - PIT') {
       steps {
         sh "mvn org.pitest:pitest-maven:mutationCoverage"
       }
-    }
-
-    stage('SonarQube - SAST') {
-      steps {
-        withSonarQubeEnv('SonarQube') {
-          sh "mvn sonar:sonar \
-                  -Dsonar.projectKey=numeric-application \
-                  -Dsonar.host.url=http://devsecops-demo2.centralus.cloudapp.azure.com:9000"
-        }
-        timeout(time: 2, unit: 'MINUTES') {
-          script {
-            waitForQualityGate abortPipeline: true
-          }
+      post {
+        always {
+          pitmutation mutationStatsFile: '**/target/pit-reports/**/mutations.xml'
         }
       }
     }
+    stage('SonarQube - SAST') {
+      steps {
+        withSonarQubeEnv('SonarQube'){
+        sh "  mvn sonar:sonar -Dsonar.projectKey=numeric-application -Dsonar.host.url=http://devsecops-demo2.centralus.cloudapp.azure.com:9000 "
+      }
+      timeout(time:2,unit:'MINUTES'){
+        waitForQualityGate abortPipeline: true
+      }
+      }
+     
+    }
 
-    stage('Vulnerability Scan - Docker ') {
+   stage('Vulnerability Scan - Docker ') {
       steps {
         sh "mvn dependency-check:check"
+      }
+      post {
+        always {
+          dependencyCheckPublisher pattern: 'target/dependency-check-report.xml'
+        }
       }
     }
 
@@ -52,8 +63,7 @@ pipeline {
         }
       }
     }
-
-    stage('Kubernetes Deployment - DEV') {
+     stage('Kubernetes Deployment - DEV') {
       steps {
         withKubeConfig([credentialsId: 'kubeconfig']) {
           sh "sed -i 's#replace#ravimarella/numeric-app:${GIT_COMMIT}#g' k8s_deployment_service.yaml"
@@ -61,24 +71,5 @@ pipeline {
         }
       }
     }
-
   }
-
-  post {
-    always {
-      junit 'target/surefire-reports/*.xml'
-      jacoco execPattern: 'target/jacoco.exec'
-      pitmutation mutationStatsFile: '**/target/pit-reports/**/mutations.xml'
-      dependencyCheckPublisher pattern: 'target/dependency-check-report.xml'
-    }
-
-    // success {
-
-    // }
-
-    // failure {
-
-    // }
-  }
-
 }
